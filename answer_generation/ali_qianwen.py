@@ -30,7 +30,7 @@ def generate_answer_with_qianwen(context: str, question: str) -> str:
         
         # 调用生成API
         response = dashscope.Generation.call(
-            model="qwen-turbo",
+            model="qwen-plus",
             prompt=prompt,
             top_p=0.8,
             temperature=0.7,

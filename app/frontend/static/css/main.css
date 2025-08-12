@@ -1,0 +1,41 @@
+/* 自定义样式 */
+#chat-container {
+    min-height: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.chat-bubble {
+    max-width: 80%;
+    padding: 1rem;
+    margin: 0.5rem;
+    border-radius: 1rem;
+}
+
+.user-bubble {
+    background-color: #e9ecef;
+    margin-left: auto;
+}
+
+.bot-bubble {
+    background-color: #0d6efd;
+    color: white;
+}
+
+#question-input {
+    resize: none;
+}
+
+#kb-list .list-group-item {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#kb-list .list-group-item:hover {
+    background-color: #f8f9fa;
+}
+
+#kb-list .list-group-item.active {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}

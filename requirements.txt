@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sentence-transformers
+langchain
+PyPDF2
+transformers
+serpapi
+requests

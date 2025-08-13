@@ -21,19 +21,54 @@ async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 # 添加知识库管理接口
+from knowledge_base.knowledge_manager import (
+    get_all_knowledge_bases, 
+    create_knowledge_base as kb_create,
+    delete_knowledge_base as kb_delete,
+    get_knowledge_base_stats
+)
+
 @app.get("/knowledge_bases")
 async def get_knowledge_bases():
-    return ["global", "java", "network"]  # 示例数据，替换为实际实现
+    """获取所有知识库列表"""
+    try:
+        kbs = get_all_knowledge_bases()
+        return {"status": "success", "data": kbs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/knowledge_bases/stats")
+async def get_kb_stats(kb_name: str = None):
+    """获取知识库统计信息"""
+    try:
+        stats = get_knowledge_base_stats(kb_name)
+        return {"status": "success", "data": stats}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/create_kb")
-async def create_knowledge_base(data: dict):
-    # 实现知识库创建逻辑
-    return {"status": "success"}
+async def create_knowledge_base_api(data: dict):
+    """创建新知识库"""
+    try:
+        kb_name = data.get("name")
+        if not kb_name:
+            return {"status": "error", "message": "知识库名称不能为空"}
+        
+        result = kb_create(kb_name)
+        return result
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.delete("/delete_kb/{kb_name}")
-async def delete_knowledge_base(kb_name: str):
-    # 实现知识库删除逻辑
-    return {"status": "success"}
+async def delete_knowledge_base_api(kb_name: str):
+    """删除指定知识库"""
+    try:
+        result = kb_delete(kb_name)
+        return result
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/upload_pdf/")
 def upload_pdf(pdf_path: str, knowledge_base_name: str = "global"):

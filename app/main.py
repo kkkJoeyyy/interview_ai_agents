@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Request
-from knowledge_base.knowledge_manager import add_pdf_to_knowledge_base, search_knowledge_base
-from intent_recognition.intent_classifier import recognize_intent
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from knowledge_base.knowledge_manager import add_pdf_to_knowledge_base, search_knowledge_base, get_all_knowledge_bases
+from intent_recognition.intent_classifier import recognize_intent_with_available_kbs
 from answer_generation.ali_qianwen import generate_answer_with_qianwen
 
 from fastapi.staticfiles import StaticFiles
@@ -71,12 +71,42 @@ async def delete_knowledge_base_api(kb_name: str):
         return {"status": "error", "message": str(e)}
 
 @app.post("/upload_pdf/")
-def upload_pdf(pdf_path: str, knowledge_base_name: str = "global"):
+async def upload_pdf_file(
+    file: UploadFile = File(...),
+    knowledge_base_name: str = Form(...)
+):
+    """上传PDF文件并添加到知识库"""
     try:
-        add_pdf_to_knowledge_base(pdf_path, knowledge_base_name)
-        return {"status": "success", "message": f"PDF已添加到{knowledge_base_name}知识库"}
+        # 验证文件类型
+        if not file.filename.lower().endswith('.pdf'):
+            return {"status": "error", "message": "只支持PDF格式文件"}
+        
+        # 验证文件大小 (50MB)
+        content = await file.read()
+        if len(content) > 50 * 1024 * 1024:
+            return {"status": "error", "message": "文件大小不能超过50MB"}
+        
+        # 保存临时文件
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # 处理PDF文件
+            chunks_count = add_pdf_to_knowledge_base(tmp_file_path, knowledge_base_name)
+            return {
+                "status": "success", 
+                "message": f"PDF文件 '{file.filename}' 已成功上传到 {knowledge_base_name} 知识库，共处理 {chunks_count} 个文本块"
+            }
+        finally:
+            # 清理临时文件
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+                
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"上传失败: {str(e)}"}
 
 @app.get("/ask/")
 def ask_question(question: str):
@@ -84,37 +114,56 @@ def ask_question(question: str):
     print(f"[DEBUG] 解码后问题：{decoded_question}")
     
     try:
-        # 获取意图列表
-        intents = recognize_intent(decoded_question)  # 注意这里使用解码后的问题
-        print(f"[DEBUG] 原始意图列表：{intents}")
+        # 获取所有可用知识库
+        available_kbs = get_all_knowledge_bases()
+        print(f"[DEBUG] 系统中可用知识库：{available_kbs}")
         
-        # 清洗意图结果
-        valid_intents = [
-            intent.lower().strip() 
-            for intent in intents 
-            if isinstance(intent, str) and len(intent) > 1
-        ]
-        valid_intents = list(set(valid_intents))  # 去重
-        print(f"[DEBUG] 有效意图列表：{valid_intents}")
+        # 基于实际知识库进行意图识别
+        matched_kbs, confidence = recognize_intent_with_available_kbs(decoded_question, available_kbs)
+        print(f"[DEBUG] 匹配的知识库：{matched_kbs}")
+        print(f"[DEBUG] 置信度：{confidence:.3f}")
         
-        # 默认回退逻辑
-        if not valid_intents:
-            valid_intents = ["global"]
-            print("[WARNING] 无有效意图，使用全局知识库")
-
-        # 上下文收集
-        context = []
-        for intent in valid_intents:
-            print(f"[DEBUG] 正在检索知识库：{intent}")
-            results = search_knowledge_base(
-                query=decoded_question,
-                knowledge_base_name=intent,
-                top_k=3  # 限制检索数量
-            )
-            context.extend([doc.page_content for doc in results])
+        # 根据置信度决定是否使用知识库
+        if confidence < 0.5:  # 置信度过低
+            print("[WARNING] 置信度过低，使用空上下文基于通用知识回答")
+            context = ""
+        elif not matched_kbs:  # 没有匹配的知识库
+            print("[WARNING] 无匹配知识库，使用空上下文基于通用知识回答")
+            context = ""
+        else:
+            # 从匹配的知识库中检索
+            context_list = []
+            all_sources = set()
+            
+            print(f"[DEBUG] 开始检索匹配的知识库：{matched_kbs}")
+            
+            for kb_name in matched_kbs:
+                print(f"[DEBUG] 正在检索知识库：{kb_name}")
+                results = search_knowledge_base(
+                    query=decoded_question,
+                    knowledge_base_name=kb_name,
+                    top_k=3  # 每个知识库限制3条结果
+                )
+                
+                # 收集上下文和来源
+                for doc in results:
+                    context_list.append(doc.page_content)
+                    all_sources.add(f"{kb_name}:{doc.metadata.get('source', 'unknown')}")
+            
+            context = "\n".join(context_list)
+            print(f"[DEBUG] 检索完成，共找到{len(context_list)}条结果")
+            print(f"[DEBUG] 涉及来源：{list(all_sources)}")
         
         # 生成回答
-        return {"answer": generate_answer_with_qianwen("\n".join(context), decoded_question)}
+        answer = generate_answer_with_qianwen(context, decoded_question)
+        
+        # 添加置信度信息到响应中
+        return {
+            "answer": answer,
+            "confidence": confidence,
+            "matched_kbs": matched_kbs,
+            "context_length": len(context)
+        }
     
     except Exception as e:
         print(f"[ERROR] 处理异常：{str(e)}")

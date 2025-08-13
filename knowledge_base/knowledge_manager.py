@@ -1,30 +1,24 @@
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 import PyPDF2
 
 # 初始化向量化模型
 model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# 方法1：使用 from_documents（推荐）
 dummy_doc = Document(page_content="dummy", metadata={"source": "dummy"})
 vector_store = FAISS.from_documents([dummy_doc], model)
 
-# 方法2：使用 from_texts（备选）
-# vector_store = FAISS.from_texts(
-#     ["dummy text"], 
-#     model, 
-#     metadatas=[{"source": "dummy"}]
-# )
-
-# 删除虚拟文档
 if vector_store.index_to_docstore_id:
     doc_id = list(vector_store.index_to_docstore_id.values())[0]
     vector_store.delete([doc_id])
     print(f"Deleted dummy document: {doc_id}")
 
-def add_pdf_to_knowledge_base(pdf_path, knowledge_base_name="global"):
+print("[INIT] 初始化完成，使用多意图识别进行跨知识库检索")
+
+def add_pdf_to_knowledge_base(pdf_path, knowledge_base_name):
     """将PDF文件解析并添加到指定知识库（RAG实现）"""
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"{pdf_path} not found.")
@@ -42,7 +36,6 @@ def add_pdf_to_knowledge_base(pdf_path, knowledge_base_name="global"):
     print(f"[RAG] PDF解析完成，总字符数：{len(text)}")
     
     # RAG文本分块处理
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,  # 每块1000字符
         chunk_overlap=200,  # 重叠200字符保持上下文
@@ -56,7 +49,7 @@ def add_pdf_to_knowledge_base(pdf_path, knowledge_base_name="global"):
     documents = []
     for i, chunk in enumerate(chunks):
         if chunk.strip():  # 跳过空片段
-            # 添加到指定知识库
+            # 只添加到指定知识库（移除global备份）
             doc = Document(
                 page_content=chunk,
                 metadata={
@@ -68,40 +61,22 @@ def add_pdf_to_knowledge_base(pdf_path, knowledge_base_name="global"):
                 }
             )
             documents.append(doc)
-            
-            # 同时添加到global知识库
-            if knowledge_base_name != "global":
-                global_doc = Document(
-                    page_content=chunk,
-                    metadata={
-                        "source": os.path.basename(pdf_path),
-                        "knowledge_base": "global",
-                        "original_kb": knowledge_base_name,  # 记录原始知识库
-                        "chunk_id": i,
-                        "total_chunks": len(chunks),
-                        "file_path": pdf_path
-                    }
-                )
-                documents.append(global_doc)
     
     # 批量添加到向量数据库
     if documents:
         vector_store.add_documents(documents)
-        print(f"[RAG] 成功添加{len(documents)}个文档片段到向量数据库")
-        print(f"[RAG] 目标知识库：{knowledge_base_name}")
-        if knowledge_base_name != "global":
-            print(f"[RAG] 同时备份到global知识库")
+        print(f"[RAG] 成功添加{len(documents)}个文档片段到知识库: {knowledge_base_name}")
     else:
         print("[RAG] 警告：未生成有效文档片段")
     
     return len(chunks)
 
-def search_knowledge_base(query: str, knowledge_base_name: str = "global", top_k: int = 5):
-    # 知识库白名单校验
-    valid_knowledge_bases = ["global", "java", "network", "database", "system-design", "algorithm"]
-    if knowledge_base_name not in valid_knowledge_bases:
-        print(f"[WARNING] 非法知识库名称：{knowledge_base_name}，使用全局知识库")
-        knowledge_base_name = "global"
+def search_knowledge_base(query: str, knowledge_base_name: str, top_k: int = 5):
+    # 验证知识库是否存在
+    existing_kbs = get_all_knowledge_bases()
+    if knowledge_base_name not in existing_kbs:
+        print(f"[WARNING] 知识库'{knowledge_base_name}'不存在，跳过检索")
+        return []
     
     # 添加检索日志
     print(f"[SEARCH] 正在检索知识库：{knowledge_base_name}")
@@ -129,14 +104,10 @@ def get_all_knowledge_bases():
             if doc and hasattr(doc, 'metadata') and 'knowledge_base' in doc.metadata:
                 knowledge_bases.add(doc.metadata['knowledge_base'])
         
-        # 确保默认知识库存在
-        if not knowledge_bases:
-            knowledge_bases.add("global")
-        
         return sorted(list(knowledge_bases))
     except Exception as e:
         print(f"[ERROR] 获取知识库列表失败：{str(e)}")
-        return ["global"]
+        return []
 
 def create_knowledge_base(kb_name: str):
     """创建新知识库（通过添加标识文档）"""
@@ -151,19 +122,6 @@ def create_knowledge_base(kb_name: str):
         existing_kbs = get_all_knowledge_bases()
         if kb_name in existing_kbs:
             return {"status": "warning", "message": f"知识库 '{kb_name}' 已存在"}
-        
-        # 确保global知识库始终存在
-        if "global" not in existing_kbs:
-            global_doc = Document(
-                page_content="这是全局知识库，包含所有上传文档的副本。",
-                metadata={
-                    "source": "system_global_identifier",
-                    "knowledge_base": "global",
-                    "type": "identifier"
-                }
-            )
-            vector_store.add_documents([global_doc])
-            print(f"[CREATE] 重新创建global知识库")
         
         # 创建新知识库标识文档
         identifier_doc = Document(

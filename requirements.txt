@@ -1,19 +1,29 @@
-fastapi
-uvicorn
-sentence-transformers
-langchain-community
-PyPDF2
-transformers
-serpapi
-requests
-dashscope
+# Web框架和服务器
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
 
-FROM python:3.9-slim
+# AI和机器学习
+transformers>=4.35.0
+sentence-transformers>=2.2.2
+dashscope>=1.17.0
 
-WORKDIR /app
+# 文档处理和向量数据库
+langchain>=0.0.350
+langchain-community>=0.0.13
+faiss-cpu>=1.7.4
+PyPDF2>=3.0.1
 
-COPY . /app
+# 网络请求
+requests>=2.31.0
+python-dotenv>=1.0.0
 
-RUN pip install --no-cache-dir -r requirements.txt
+# 可选插件依赖
+serpapi>=0.1.5
+langdetect>=1.0.9
+googletrans>=4.0.0
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Jinja2模板引擎（FastAPI依赖）
+jinja2>=3.1.2
+
+# 类型注解支持
+typing-extensions>=4.8.0
